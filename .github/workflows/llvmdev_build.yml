@@ -3,7 +3,7 @@ name: llvmdev
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 23 * * *'
+    - cron: '0 1 * * *'
 
 jobs:
   build:
@@ -80,6 +80,7 @@ jobs:
 
       - name: Build llvmdev
         if: env.build == '1'
+        timeout-minutes: 330
         run: |
           DOCKER_IMAGE=ghcr.io/loong64/manylinux_2_38_loongarch64
           DOCKER_CMD="yum install -y ccache git ninja-build patch wget xz && \
