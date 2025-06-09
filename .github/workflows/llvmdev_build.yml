@@ -1,0 +1,131 @@
+name: llvmdev
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 23 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get Version
+        run: |
+          APP_VERSION=$(curl -s "https://api.github.com/repos/numba/llvmlite/releases/latest" | jq -r .tag_name)
+          if [ -z "${APP_VERSION}" ] || [ "${APP_VERSION}" == "null" ]; then
+            echo "Failed to get version"
+            exit 1
+          fi
+
+          echo "APP_VERSION=${APP_VERSION}" >> $GITHUB_ENV
+          echo ""
+          echo "========== Build Args =========="
+          echo "APP_VERSION=${APP_VERSION}"
+      
+      - name: Check Release
+        run: |
+          gh release view ${{ env.APP_VERSION }} -R ${{ github.repository }} | grep llvm-.*.tar.gz >/dev/null 2>&1 || echo "build=1" >> $GITHUB_ENV
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout
+        if: env.build == '1'
+        uses: actions/checkout@v4
+        with: 
+          repository: numba/llvmlite
+          ref: ${{ env.APP_VERSION }}
+
+      - name: Prepare LLVM
+        if: env.build == '1'
+        run: |
+          set -ex
+          if [ ! -f "conda-recipes/llvmdev/meta.yaml" ]; then
+            exit 1
+          fi
+          llvm_version=$(grep -E '{%\s*set\s+version\s*=' conda-recipes/llvmdev/meta.yaml | awk -F'"' '{print $2}')
+          echo "llvm_version=${llvm_version}" >> $GITHUB_ENV
+          mkdir -p /home/runner/data/llvm-src
+          wget -qO - "https://github.com/llvm/llvm-project/releases/download/llvmorg-${llvm_version}/llvm-project-${llvm_version}.src.tar.xz" | tar -xJf - -C /home/runner/data/llvm-src --strip-components=1
+          wget -qO /tmp/support-native-loongarch-builds.patch https://github.com/llvm/llvm-project/commit/313ce7217e650f3c5c404dcd70c729e003599a49.patch
+          wget -qO /tmp/add-64-bit-LoongArch-support.patch https://github.com/llvm/llvm-project/commit/c5072695127e767a76973cdbed683215df31fa40.patch
+
+          pushd /home/runner/data/llvm-src
+          for f in $(find ${{ github.workspace }}/conda-recipes -name '*.patch'); do
+            patch -p1 -i $f
+          done
+          patch -p1 -i /tmp/support-native-loongarch-builds.patch
+          patch -p1 -i /tmp/add-64-bit-LoongArch-support.patch
+          wget -qO llvm/cmake/config.guess https://github.com/cgitmirror/config/raw/refs/heads/master/config.guess
+          popd
+
+      - name: Cache Build
+        if: env.build == '1'
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /home/runner/data/cache
+          key: ${{ runner.os }}-llvm-build-${{ env.llvm_version }}-
+
+      - name: Set permissions
+        if: env.build == '1'
+        run: |
+          mkdir -p /home/runner/data/cache
+          sudo chmod -R 777 /home/runner/data
+          sudo chown -R root:docker /home/runner/data
+
+      - name: Setup QEMU
+        if: env.build == '1'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build llvmdev
+        if: env.build == '1'
+        run: |
+          DOCKER_IMAGE=ghcr.io/loong64/manylinux_2_38_loongarch64
+          DOCKER_CMD="yum install -y ccache git ninja-build patch wget xz && \
+          bash -ex /io/llvmlite/conda-recipes/llvmdev/build.sh && \
+          mkdir -p /io/llvmlite/dist && \
+          cd /opt && \
+          tar -czf /io/llvmlite/dist/llvm-${{ env.llvm_version }}.tar.gz llvm && \
+          cd /io/llvmlite/dist && \
+          sha256sum llvm-${{ env.llvm_version }}.tar.gz > llvm-${{ env.llvm_version }}.tar.gz.sha256"
+
+          docker run --rm \
+            --platform linux/loong64 \
+            --volume "$(pwd):/io/llvmlite" \
+            --volume "/home/runner/data/llvm-src:/io/llvm-src" \
+            --volume "/home/runner/data/cache:/root/.cache" \
+            --volume "/opt/llvm:/opt/llvm" \
+            --env USE_CCACHE=1 \
+            --env PREFIX="/opt/llvm" \
+            --env CONDA_BUILD_CROSS_COMPILATION=1 \
+            --env CMAKE_ARGS="-DLLVM_INCLUDE_TESTS=OFF -DLLVM_CCACHE_BUILD=ON" \
+            --workdir /io/llvm-src \
+            $DOCKER_IMAGE \
+            sh -c "$DOCKER_CMD"
+
+      - name: Cache permissions
+        if: always() && env.build == '1'
+        run: |
+          sudo rm -rf /home/runner/data/llvm-src
+          sudo chown -R runner:docker /home/runner/data/cache
+
+      - name: Save Cache
+        if: always() && env.build == '1'
+        id: cache-save
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/data/cache
+          key: ${{ runner.os }}-llvm-build-${{ env.llvm_version }}-${{ github.run_id }}
+      
+      - name: GitHub Release
+        if: env.build == '1'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ env.APP_VERSION }}
+          tag_name: ${{ env.APP_VERSION }}
+          files: dist/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
