@@ -57,7 +57,7 @@ jobs:
           wget -O - "$download_url" | tar xz --strip-components=1
 
           llvm_version=$(curl -sL https://github.com/numba/llvmlite/raw/refs/tags/v${version}/conda-recipes/llvmdev/meta.yaml | grep -E '{%\s*set\s+version\s*=' | awk -F'"' '{print $2}')
-          wget -qO /tmp/llvm-build.tar.gz "https://github.com/${{ github.repository }}/releases/download/v${version}/llvm-${llvm_version}.tar.gz"
+          wget -qO /tmp/llvm-build.tar.gz "https://github.com/${{ github.repository }}/releases/download/llvm-${llvm_version}/llvm-${llvm_version}-loong64.tar.gz"
 
       - name: Setup QEMU
         if: env.BUILD != 'false'

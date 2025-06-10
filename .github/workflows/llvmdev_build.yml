@@ -12,19 +12,22 @@ jobs:
       - name: Get Version
         run: |
           APP_VERSION=$(curl -s "https://api.github.com/repos/numba/llvmlite/releases/latest" | jq -r .tag_name)
-          if [ -z "${APP_VERSION}" ] || [ "${APP_VERSION}" == "null" ]; then
+          LLVM_VERSION=$(curl -sL https://github.com/numba/llvmlite/raw/refs/tags/${APP_VERSION}/conda-recipes/llvmdev/meta.yaml | grep -E '{%\s*set\s+version\s*=' | awk -F'"' '{print $2}')
+          if [ -z "${APP_VERSION}" ] || [ "${APP_VERSION}" == "null" ] || [ -z "${LLVM_VERSION}" ] || [ "${LLVM_VERSION}" == "null" ]; then
             echo "Failed to get version"
             exit 1
           fi
 
           echo "APP_VERSION=${APP_VERSION}" >> $GITHUB_ENV
-          echo ""
+          echo "LLVM_VERSION=${LLVM_VERSION}" >> $GITHUB_ENV
+          echo
           echo "========== Build Args =========="
           echo "APP_VERSION=${APP_VERSION}"
+          echo "LLVM_VERSION=${LLVM_VERSION}"
       
       - name: Check Release
         run: |
-          gh release view ${{ env.APP_VERSION }} -R ${{ github.repository }} | grep llvm-.*.tar.gz >/dev/null 2>&1 || echo "build=1" >> $GITHUB_ENV
+          gh release view ${{ env.LLVM_VERSION }} -R ${{ github.repository }} | grep llvm-.*.tar.gz >/dev/null 2>&1 || echo "build=1" >> $GITHUB_ENV
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -42,10 +45,8 @@ jobs:
           if [ ! -f "conda-recipes/llvmdev/meta.yaml" ]; then
             exit 1
           fi
-          llvm_version=$(grep -E '{%\s*set\s+version\s*=' conda-recipes/llvmdev/meta.yaml | awk -F'"' '{print $2}')
-          echo "llvm_version=${llvm_version}" >> $GITHUB_ENV
           mkdir -p /home/runner/data/llvm-src
-          wget -qO - "https://github.com/llvm/llvm-project/releases/download/llvmorg-${llvm_version}/llvm-project-${llvm_version}.src.tar.xz" | tar -xJf - -C /home/runner/data/llvm-src --strip-components=1
+          wget -qO - "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz" | tar -xJf - -C /home/runner/data/llvm-src --strip-components=1
           wget -qO /tmp/support-native-loongarch-builds.patch https://github.com/llvm/llvm-project/commit/313ce7217e650f3c5c404dcd70c729e003599a49.patch
           wget -qO /tmp/add-64-bit-LoongArch-support.patch https://github.com/llvm/llvm-project/commit/c5072695127e767a76973cdbed683215df31fa40.patch
 
@@ -65,7 +66,7 @@ jobs:
         with:
           path: |
             /home/runner/data/cache
-          key: ${{ runner.os }}-llvm-build-${{ env.llvm_version }}-
+          key: ${{ runner.os }}-llvm-build-${{ env.LLVM_VERSION }}-
 
       - name: Set permissions
         if: env.build == '1'
@@ -87,9 +88,9 @@ jobs:
           bash -ex /io/llvmlite/conda-recipes/llvmdev/build.sh && \
           mkdir -p /io/llvmlite/dist && \
           cd /opt && \
-          tar -czf /io/llvmlite/dist/llvm-${{ env.llvm_version }}.tar.gz llvm && \
+          tar -czf /io/llvmlite/dist/llvm-${{ env.LLVM_VERSION }}-loong64.tar.gz llvm && \
           cd /io/llvmlite/dist && \
-          sha256sum llvm-${{ env.llvm_version }}.tar.gz > llvm-${{ env.llvm_version }}.tar.gz.sha256"
+          sha256sum llvm-${{ env.LLVM_VERSION }}-loong64.tar.gz > llvm-${{ env.LLVM_VERSION }}-loong64.tar.gz.sha256"
 
           docker run --rm \
             --platform linux/loong64 \
@@ -117,14 +118,14 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: /home/runner/data/cache
-          key: ${{ runner.os }}-llvm-build-${{ env.llvm_version }}-${{ github.run_id }}
+          key: ${{ runner.os }}-llvm-build-${{ env.LLVM_VERSION }}-${{ github.run_id }}
       
       - name: GitHub Release
         if: env.build == '1'
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ env.APP_VERSION }}
-          tag_name: ${{ env.APP_VERSION }}
+          name: llvm-${{ env.LLVM_VERSION }}
+          tag_name: llvm-${{ env.LLVM_VERSION }}
           files: dist/*
           draft: false
           prerelease: false
