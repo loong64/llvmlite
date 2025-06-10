@@ -8,11 +8,23 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [ 'main', 'latest' ]
     steps:
       - name: Get Version
         run: |
           APP_VERSION=$(curl -s "https://api.github.com/repos/numba/llvmlite/releases/latest" | jq -r .tag_name)
-          LLVM_VERSION=$(curl -sL https://github.com/numba/llvmlite/raw/refs/tags/${APP_VERSION}/conda-recipes/llvmdev/meta.yaml | grep -E '{%\s*set\s+version\s*=' | awk -F'"' '{print $2}')
+          case "${{ matrix.version }}" in
+            latest)
+              LLVM_VERSION=$(curl -sL https://github.com/numba/llvmlite/raw/refs/tags/${APP_VERSION}/conda-recipes/llvmdev/meta.yaml | grep -E '{%\s*set\s+version\s*=' | awk -F'"' '{print $2}')
+              ;;
+            main)
+              LLVM_VERSION=$(curl -sL https://github.com/numba/llvmlite/raw/refs/heads/main/conda-recipes/llvmdev/meta.yaml | grep -E '{%\s*set\s+version\s*=' | awk -F'"' '{print $2}')
+              ;;
+          esac
+
           if [ -z "${APP_VERSION}" ] || [ "${APP_VERSION}" == "null" ] || [ -z "${LLVM_VERSION}" ] || [ "${LLVM_VERSION}" == "null" ]; then
             echo "Failed to get version"
             exit 1
@@ -20,14 +32,14 @@ jobs:
 
           echo "APP_VERSION=${APP_VERSION}" >> $GITHUB_ENV
           echo "LLVM_VERSION=${LLVM_VERSION}" >> $GITHUB_ENV
-          echo
+          echo ""
           echo "========== Build Args =========="
           echo "APP_VERSION=${APP_VERSION}"
           echo "LLVM_VERSION=${LLVM_VERSION}"
       
       - name: Check Release
         run: |
-          gh release view ${{ env.LLVM_VERSION }} -R ${{ github.repository }} | grep llvm-.*.tar.gz >/dev/null 2>&1 || echo "build=1" >> $GITHUB_ENV
+          gh release view llvm-${{ env.LLVM_VERSION }} -R ${{ github.repository }} | grep llvm-.*.tar.gz >/dev/null 2>&1 || echo "build=1" >> $GITHUB_ENV
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
