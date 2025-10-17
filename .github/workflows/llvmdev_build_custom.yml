@@ -1,29 +1,22 @@
-name: llvmdev
+name: llvmdev (custom)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 1 * * *'
+    inputs:
+      version:
+        default: 'v0.45.1'
+        description: 'Package version'
+        type: string
+        required: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        version: [ 'main', 'latest' ]
     steps:
       - name: Get Version
         run: |
-          APP_VERSION=$(curl -s "https://api.github.com/repos/numba/llvmlite/releases/latest" | jq -r .tag_name)
-          case "${{ matrix.version }}" in
-            latest)
-              LLVM_VERSION=$(curl -sL https://github.com/numba/llvmlite/raw/refs/tags/${APP_VERSION}/conda-recipes/llvmdev/meta.yaml | grep -E '{%\s*set\s+version\s*=' | awk -F'"' '{print $2}')
-              ;;
-            main)
-              LLVM_VERSION=$(curl -sL https://github.com/numba/llvmlite/raw/refs/heads/main/conda-recipes/llvmdev/meta.yaml | grep -E '{%\s*set\s+version\s*=' | awk -F'"' '{print $2}')
-              ;;
-          esac
+          APP_VERSION=${{ github.event.inputs.version }}
+          LLVM_VERSION=$(curl -sL https://github.com/numba/llvmlite/raw/refs/tags/${APP_VERSION}/conda-recipes/llvmdev/meta.yaml | grep -E '{%\s*set\s+version\s*=' | awk -F'"' '{print $2}')
 
           if [ -z "${APP_VERSION}" ] || [ "${APP_VERSION}" == "null" ] || [ -z "${LLVM_VERSION}" ] || [ "${LLVM_VERSION}" == "null" ]; then
             echo "Failed to get version"
@@ -59,21 +52,6 @@ jobs:
           fi
           mkdir -p /home/runner/data/llvm-src
           wget -qO - "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz" | tar -xJf - -C /home/runner/data/llvm-src --strip-components=1
-
-          case "${{ matrix.version }}" in
-            latest)
-              pushd /home/runner/data/llvm-src
-              wget -qO /tmp/support-native-loongarch-builds.patch https://github.com/llvm/llvm-project/commit/313ce7217e650f3c5c404dcd70c729e003599a49.patch
-              wget -qO /tmp/add-64-bit-LoongArch-support.patch https://github.com/llvm/llvm-project/commit/c5072695127e767a76973cdbed683215df31fa40.patch
-              for f in $(find ${{ github.workspace }}/conda-recipes -name '*.patch'); do
-                patch -p1 -i $f
-              done
-              patch -p1 -i /tmp/support-native-loongarch-builds.patch
-              patch -p1 -i /tmp/add-64-bit-LoongArch-support.patch
-              wget -qO llvm/cmake/config.guess https://github.com/cgitmirror/config/raw/refs/heads/master/config.guess
-              popd
-              ;;
-          esac
 
       - name: Cache Build
         if: env.build == '1'
