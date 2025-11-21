@@ -65,15 +65,13 @@ jobs:
 
       - name: Build wheels
         if: env.BUILD != 'false'
-        uses: loong64/cibuildwheel@v3.2.1
+        uses: loong64/cibuildwheel@v3.3.0
         env:
           CIBW_ARCHS: "${{ matrix.arch }}"
           CIBW_BUILD: "*-${{ matrix.build }}${{ matrix.arch }}"
           CIBW_BUILD_VERBOSITY: 1
           CIBW_BEFORE_ALL_LINUX: >
             tar -xf /host/tmp/llvm-build.tar.gz -C /opt
-          CIBW_BEFORE_BUILD: >
-            pip install https://github.com/loong64/auditwheel/releases/download/6.4.2/auditwheel-6.4.2-py3-none-any.whl
           CIBW_ENVIRONMENT_PASS_LINUX: "PIP_EXTRA_INDEX_URL CMAKE_PREFIX_PATH LLVMLITE_PACKAGE_FORMAT"
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.10"
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: "auditwheel --verbose repair -w {dest_dir} {wheel}"
