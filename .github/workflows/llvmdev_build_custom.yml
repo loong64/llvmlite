@@ -50,24 +50,9 @@ jobs:
           if [ ! -f "conda-recipes/llvmdev/meta.yaml" ]; then
             exit 1
           fi
+          wget -qO buildscripts/manylinux/install-static-clang.sh https://github.com/loong64/cmake-python-distributions/raw/refs/heads/patch_loong64/scripts/install-static-clang.sh
           mkdir -p /home/runner/data/llvm-src
           wget -qO - "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz" | tar -xJf - -C /home/runner/data/llvm-src --strip-components=1
-
-      - name: Cache Build
-        if: env.build == '1'
-        id: cache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            /home/runner/data/cache
-          key: ${{ runner.os }}-llvm-build-${{ env.LLVM_VERSION }}-
-
-      - name: Set permissions
-        if: env.build == '1'
-        run: |
-          mkdir -p /home/runner/data/cache
-          sudo chmod -R 777 /home/runner/data
-          sudo chown -R root:docker /home/runner/data
 
       - name: Setup QEMU
         if: env.build == '1'
@@ -75,10 +60,10 @@ jobs:
 
       - name: Build llvmdev
         if: env.build == '1'
-        timeout-minutes: 330
         run: |
           DOCKER_IMAGE=ghcr.io/loong64/manylinux_2_38_loongarch64
-          DOCKER_CMD="yum install -y ccache git ninja-build patch wget xz && \
+          DOCKER_CMD="yum install -y git ninja-build patch wget xz && \
+          bash -ex /io/llvmlite/buildscripts/manylinux/install-static-clang.sh && \
           bash -ex /io/llvmlite/conda-recipes/llvmdev/build.sh && \
           mkdir -p /io/llvmlite/dist && \
           cd /opt && \
@@ -90,29 +75,17 @@ jobs:
             --platform linux/loong64 \
             --volume "$(pwd):/io/llvmlite" \
             --volume "/home/runner/data/llvm-src:/io/llvm-src" \
-            --volume "/home/runner/data/cache:/root/.cache" \
             --volume "/opt/llvm:/opt/llvm" \
-            --env USE_CCACHE=1 \
+            --env RUNNER_ARCH=${RUNNER_ARCH} \
+            --env CC="/opt/clang/bin/clang" \
+            --env CXX="/opt/clang/bin/clang++" \
+            --env LDFLAGS="-fuse-ld=lld -Wl,--build-id" \
             --env PREFIX="/opt/llvm" \
             --env CONDA_BUILD_CROSS_COMPILATION=1 \
-            --env CMAKE_ARGS="-DLLVM_INCLUDE_TESTS=OFF -DLLVM_CCACHE_BUILD=ON" \
+            --env CMAKE_ARGS="-DLLVM_INCLUDE_TESTS=OFF" \
             --workdir /io/llvm-src \
             $DOCKER_IMAGE \
             sh -c "$DOCKER_CMD"
-
-      - name: Cache permissions
-        if: always() && env.build == '1'
-        run: |
-          sudo rm -rf /home/runner/data/llvm-src
-          sudo chown -R runner:docker /home/runner/data/cache
-
-      - name: Save Cache
-        if: always() && env.build == '1'
-        id: cache-save
-        uses: actions/cache/save@v4
-        with:
-          path: /home/runner/data/cache
-          key: ${{ runner.os }}-llvm-build-${{ env.LLVM_VERSION }}-${{ github.run_id }}
       
       - name: GitHub Release
         if: env.build == '1'
